@@ -1,6 +1,7 @@
 import abc
 import dataclasses
 import enum
+import pprint
 import sys
 import typing
 
@@ -27,6 +28,14 @@ class CharacterClass(enum.Enum):
 
             case _:
                 raise RuntimeError(f"unknown enum: {self}")
+
+    @staticmethod
+    def of(character: str):
+        for klass in CharacterClass:
+            if klass.value == character:
+                return klass
+
+        raise RuntimeError(f"unknown CharacterClass: {character}")
 
 
 @dataclasses.dataclass
@@ -110,29 +119,106 @@ class Node:
     def add(self, matcher: Matcher, node: "Node"):
         self.matchers.append((matcher, node))
 
+    def print(self, depth=0):
+        tab = "    " * depth
+
+        print(f'{tab}Node "{self.name}"')
+
+        if not self.matchers:
+            print(f'{tab}End')
+            return
+
+        for index, (matcher, node) in enumerate(self.matchers):
+            print(f'{tab}  [{index}] {matcher}')
+            node.print(depth + 1)
+
 
 def build(pattern):
     start = Node("start")
-    end = Node("end")
+    node_count = 0
 
-    if len(pattern) == 1:
-        literal = Literal(pattern[0])
-        start.add(literal, end)
-    elif pattern == '\\d':
-        range = Range(CharacterClass.DIGITS)
-        start.add(range, end)
-    elif pattern == '\\w':
-        range = Range(CharacterClass.WORDS)
-        start.add(range, end)
-    elif pattern[0] == '[' and pattern[-1] == ']':
-        if pattern[1] == '^':
-            group = Group(pattern[2:-1], negate=True)
-        else:
-            group = Group(pattern[1:-1], negate=False)
+    current_node = start
 
-        start.add(group, end)
-    else:
-        raise RuntimeError(f"Unhandled pattern: {pattern}")
+    index = 0
+
+    def consume():
+        nonlocal index
+
+        try:
+            character = pattern[index]
+            index += 1
+
+            return character
+        except IndexError:
+            return "\0"
+
+    def read_current():
+        try:
+            return pattern[index]
+        except IndexError:
+            return "\0"
+
+    def read_peek():
+        try:
+            return pattern[index + 1]
+        except IndexError:
+            return "\0"
+
+    def link(matcher: Matcher, node: Node = None):
+        nonlocal current_node, node_count
+
+        next = Node(f"q{node_count}")
+        node_count += 1
+
+        if node is None:
+            node = current_node
+
+        node.add(matcher, next)
+        current_node = next
+
+    while index < len(pattern):
+        current = consume()
+        print(f"current `{current}`  {index}")
+
+        match current:
+            case '\\':
+                klass = consume()
+
+                matcher = Range(CharacterClass.of(klass))
+                link(matcher)
+
+            case '[':
+                values = ""
+                negate = False
+
+                while True:
+                    current = consume()
+
+                    if current == '^' and not values:
+                        negate = True
+                        continue
+
+                    if current == "]":
+                        break
+
+                    values += current
+
+                matcher = Group(values, negate)
+                link(matcher)
+
+            case _:
+                value = current
+
+                while True:
+                    next = read_current()
+                    if next in "\\[]\0":
+                        break
+
+                    value += next
+                    index += 1
+
+                matcher = Literal(value)
+                link(matcher)
 
     return start
 
@@ -161,7 +247,7 @@ def main():
         exit(1)
 
     graph = build(pattern)
-    print(graph)
+    graph.print()
 
     if match(graph, Consumer(input_line)):
         exit(0)
