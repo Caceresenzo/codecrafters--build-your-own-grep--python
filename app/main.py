@@ -70,6 +70,10 @@ class Consumer:
         self.marks.append(self.index)
         return self.index
 
+    def pop(self):
+        self.marks.pop()
+        return self.index
+
     def reset(self):
         self.index = self.marks.pop()
         return self.index
@@ -81,6 +85,9 @@ class Consumer:
     @property
     def end(self):
         return self.index >= len(self.input)
+
+    def __str__(self):
+        return f"Consumer(input='{self.input}', index={self.index}, marks={self.marks}, remaining={self.input[self.index:]})"
 
 
 class Matcher(abc.ABC):
@@ -144,6 +151,25 @@ class End(Matcher):
 
 
 @dataclasses.dataclass
+class Repeat(Matcher):
+
+    delegate: Matcher
+    min: int
+    max: int = 0xffffffff
+
+    def test(self, input: Consumer):
+        for x in range(self.max):
+            input.mark()
+            if not self.delegate.test(input):
+                input.reset()
+                return x >= self.min
+
+            input.pop()
+
+        return True
+
+
+@dataclasses.dataclass
 class Node:
 
     name: str
@@ -171,10 +197,7 @@ class Node:
 
 
 def build(pattern):
-    start = Node("start")
-    node_count = 0
-
-    current_node = start
+    matchers: typing.List[Matcher] = []
 
     index = 0
 
@@ -201,18 +224,6 @@ def build(pattern):
         except IndexError:
             return "\0"
 
-    def link(matcher: Matcher, node: Node = None):
-        nonlocal current_node, node_count
-
-        next = Node(f"q{node_count}")
-        node_count += 1
-
-        if node is None:
-            node = current_node
-
-        node.add(matcher, next)
-        current_node = next
-
     while index < len(pattern):
         current = consume()
 
@@ -225,15 +236,13 @@ def build(pattern):
                 else:
                     matcher = Range(CharacterClass.of(klass))
 
-                link(matcher)
+                matchers.append(matcher)
 
             case '^':
-                matcher = Start()
-                link(matcher)
+                matchers.append(Start())
 
             case '$':
-                matcher = End()
-                link(matcher)
+                matchers.append(End())
 
             case '[':
                 values = ""
@@ -251,22 +260,37 @@ def build(pattern):
 
                     values += current
 
-                matcher = Group(values, negate)
-                link(matcher)
+                matchers.append(Group(values, negate))
+
+            case '+':
+                matcher = matchers.pop()
+                matchers.append(Repeat(matcher, 1))
 
             case _:
                 value = current
 
                 while True:
                     next = read_current()
-                    if next in "\\[]^$\0":
+                    if next in "\\[]^$+\0":
+                        if next == "+":
+                            last = value[-1]
+                            matchers.append(Literal(value[:-1]))
+                            matchers.append(Literal(last))
+                        else:
+                            matchers.append(Literal(value))
+
                         break
 
                     value += next
                     index += 1
 
-                matcher = Literal(value)
-                link(matcher)
+    start = Node("start")
+
+    node = start
+    for index, matcher in enumerate(matchers, 1):
+        next = Node(f"q{index}")
+        node.add(matcher, next)
+        node = next
 
     return start
 
