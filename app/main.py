@@ -62,6 +62,10 @@ class Consumer:
         return self.marks.pop()
 
     @property
+    def start(self):
+        return self.index == 0
+
+    @property
     def end(self):
         return self.index >= len(self.input)
 
@@ -108,6 +112,13 @@ class Group(Matcher):
             is_in = not is_in
 
         return is_in
+
+
+@dataclasses.dataclass
+class Start(Matcher):
+
+    def test(self, input: Consumer):
+        return input.start
 
 
 @dataclasses.dataclass
@@ -188,6 +199,10 @@ def build(pattern):
                 klass = consume()
 
                 matcher = Range(CharacterClass.of(klass))
+                link(matcher)
+
+            case '^':
+                matcher = Start()
                 link(matcher)
 
             case '[':
