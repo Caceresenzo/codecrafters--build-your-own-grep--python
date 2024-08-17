@@ -67,9 +67,7 @@ class Literal(Matcher):
 
     def test(self, input: Consumer):
         for character in self.value:
-            next = input.next()
-            print(f"testing next `{next}` with `{character}`")
-            if next != character:
+            if input.next() != character:
                 return False
 
         return True
@@ -82,6 +80,15 @@ class Range(Matcher):
 
     def test(self, input: Consumer):
         return self.character_class.test(input.next())
+
+
+@dataclasses.dataclass
+class Group(Matcher):
+
+    values: str
+
+    def test(self, input: Consumer):
+        return input.next() in self.values
 
 
 @dataclasses.dataclass
@@ -111,6 +118,9 @@ def build(pattern):
     elif pattern == '\\w':
         range = Range(CharacterClass.WORDS)
         start.add(range, end)
+    elif pattern[0] == '[' and pattern[-1] == ']':
+        group = Group(pattern[1:-1])
+        start.add(group, end)
     else:
         raise RuntimeError(f"Unhandled pattern: {pattern}")
 
