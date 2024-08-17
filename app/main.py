@@ -17,6 +17,14 @@ class CharacterClass(enum.Enum):
             case CharacterClass.DIGITS:
                 return character >= ord('0') and character <= ord('9')
 
+            case CharacterClass.WORDS:
+                return (
+                    (character >= ord('0') and character <= ord('9'))
+                    or character >= ord('A') and character <= ord('Z')
+                    or character >= ord('a') and character <= ord('z')
+                    or character == ord('_')
+                )
+
             case _:
                 raise RuntimeError(f"unknown enum: {self}")
 
@@ -99,6 +107,9 @@ def build(pattern):
         start.add(literal, end)
     elif pattern == '\\d':
         range = Range(CharacterClass.DIGITS)
+        start.add(range, end)
+    elif pattern == '\\w':
+        range = Range(CharacterClass.WORDS)
         start.add(range, end)
     else:
         raise RuntimeError(f"Unhandled pattern: {pattern}")
