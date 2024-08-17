@@ -46,13 +46,13 @@ class Consumer:
     marks: typing.List[int] = dataclasses.field(default_factory=list)
 
     def next(self):
-        try:
-            character = self.input[self.index]
-            self.index += 1
-
-            return character
-        except IndexError:
+        if self.end:
             return "\0"
+
+        previous_index = self.index
+        self.index += 1
+
+        return self.input[previous_index]
 
     def mark(self):
         self.marks.append(self.index)
@@ -60,6 +60,10 @@ class Consumer:
 
     def reset(self):
         return self.marks.pop()
+
+    @property
+    def end(self):
+        return self.index >= len(self.input)
 
 
 class Matcher(abc.ABC):
@@ -178,7 +182,6 @@ def build(pattern):
 
     while index < len(pattern):
         current = consume()
-        print(f"current `{current}`  {index}")
 
         match current:
             case '\\':
@@ -227,13 +230,16 @@ def match(root: Node, input: Consumer) -> bool:
     if root.end:
         return True
 
-    for matcher, node in root.matchers:
-        input.mark()
+    while not input.end:
+        for matcher, node in root.matchers:
+            input.mark()
 
-        if matcher.test(input):
-            return match(node, input)
+            if matcher.test(input):
+                return match(node, input)
 
-        input.reset()
+            input.reset()
+
+        input.next()
 
     return False
 
