@@ -266,23 +266,12 @@ def build(pattern):
                 matcher = matchers.pop()
                 matchers.append(Repeat(matcher, 1))
 
+            case '?':
+                matcher = matchers.pop()
+                matchers.append(Repeat(matcher, 0, 1))
+
             case _:
-                value = current
-
-                while True:
-                    next = read_current()
-                    if next in "\\[]^$+\0":
-                        if next == "+":
-                            last = value[-1]
-                            matchers.append(Literal(value[:-1]))
-                            matchers.append(Literal(last))
-                        else:
-                            matchers.append(Literal(value))
-
-                        break
-
-                    value += next
-                    index += 1
+                matchers.append(Literal(current))
 
     start = Node("start")
 
