@@ -1,14 +1,113 @@
+import abc
+import dataclasses
 import sys
-
-# import pyparsing - available if you need it!
-# import lark - available if you need it!
+import typing
 
 
-def match_pattern(input_line, pattern):
+class CharacterClasses:
+
+    w = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_"
+
+
+@dataclasses.dataclass
+class Consumer:
+
+    input: str
+    index: int = 0
+    marks: typing.List[int] = dataclasses.field(default_factory=list)
+
+    def next(self):
+        try:
+            character = self.input[self.index]
+            self.index += 1
+
+            return character
+        except IndexError:
+            return "\0"
+
+    def mark(self):
+        self.marks.append(self.index)
+        return self.index
+
+    def reset(self):
+        return self.marks.pop()
+
+
+class Matcher(abc.ABC):
+
+    @abc.abstractmethod
+    def test(self, input: str):
+        pass
+
+
+@dataclasses.dataclass
+class Literal(Matcher):
+
+    value: str
+
+    def test(self, input: Consumer):
+        for character in self.value:
+            next = input.next()
+            print(f"testing next `{next}` with `{character}`")
+            if next != character:
+                return False
+
+        return True
+
+
+@dataclasses.dataclass
+class Range(Matcher):
+
+    values: str
+
+    def test(self, input: Consumer):
+        return input.next() in self.values
+
+
+@dataclasses.dataclass
+class Node:
+
+    name: str
+    matchers: typing.List[typing.Tuple[Matcher, "Node"]] = dataclasses.field(default_factory=list)
+
+    @property
+    def end(self):
+        return len(self.matchers) == 0
+
+    def add(self, matcher: Matcher, node: "Node"):
+        self.matchers.append((matcher, node))
+
+
+def build(pattern):
+    start = Node("start")
+    end = Node("end")
+
     if len(pattern) == 1:
-        return pattern in input_line
+        literal = Literal(pattern[0])
+        start.add(literal, end)
     else:
         raise RuntimeError(f"Unhandled pattern: {pattern}")
+
+    # range = Range(CharacterClasses.w)
+    # start.add(range, start)
+    # start.add(range, end)
+
+    return start
+
+
+def match(root: Node, input: Consumer) -> bool:
+    if root.end:
+        return True
+
+    for matcher, node in root.matchers:
+        input.mark()
+
+        if matcher.test(input):
+            return match(node, input)
+
+        input.reset()
+
+    return False
 
 
 def main():
@@ -19,7 +118,10 @@ def main():
         print("Expected first argument to be '-E'")
         exit(1)
 
-    if match_pattern(input_line, pattern):
+    graph = build(pattern)
+    print(graph)
+
+    if match(graph, Consumer(input_line)):
         exit(0)
     else:
         exit(1)
