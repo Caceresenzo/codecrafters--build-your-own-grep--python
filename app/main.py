@@ -71,7 +71,8 @@ class Consumer:
         return self.index
 
     def reset(self):
-        return self.marks.pop()
+        self.index = self.marks.pop()
+        return self.index
 
     @property
     def start(self):
@@ -118,7 +119,11 @@ class Group(Matcher):
     negate: bool = False
 
     def test(self, input: Consumer):
-        is_in = input.next() in self.values
+        next = input.next()
+        if next == "\0":
+            return False
+
+        is_in = next in self.values
 
         if self.negate:
             is_in = not is_in
