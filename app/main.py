@@ -123,12 +123,10 @@ class Group(Matcher):
         if next == "\0":
             return False
 
-        is_in = next in self.values
-
         if self.negate:
-            is_in = not is_in
-
-        return is_in
+            return next not in self.values
+        else:
+            return next in self.values
 
 
 @dataclasses.dataclass
