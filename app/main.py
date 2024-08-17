@@ -198,7 +198,11 @@ def build(pattern):
             case '\\':
                 klass = consume()
 
-                matcher = Range(CharacterClass.of(klass))
+                if klass == '\\':
+                    matcher = Literal("\\")
+                else:
+                    matcher = Range(CharacterClass.of(klass))
+
                 link(matcher)
 
             case '^':
