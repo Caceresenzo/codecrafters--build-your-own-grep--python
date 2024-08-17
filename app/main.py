@@ -93,8 +93,16 @@ class Consumer:
 class Matcher(abc.ABC):
 
     @abc.abstractmethod
-    def test(self, input: str):
+    def test(self, input: Consumer) -> bool:
         pass
+
+
+@dataclasses.dataclass
+class Wildcard(Matcher):
+
+    def test(self, input):
+        input.next()
+        return True
 
 
 @dataclasses.dataclass
@@ -102,7 +110,7 @@ class Literal(Matcher):
 
     value: str
 
-    def test(self, input: Consumer):
+    def test(self, input):
         for character in self.value:
             if input.next() != character:
                 return False
@@ -115,7 +123,7 @@ class Range(Matcher):
 
     character_class: CharacterClass
 
-    def test(self, input: Consumer):
+    def test(self, input):
         return self.character_class.test(input.next())
 
 
@@ -125,7 +133,7 @@ class Group(Matcher):
     values: str
     negate: bool = False
 
-    def test(self, input: Consumer):
+    def test(self, input):
         next = input.next()
         if next == "\0":
             return False
@@ -139,14 +147,14 @@ class Group(Matcher):
 @dataclasses.dataclass
 class Start(Matcher):
 
-    def test(self, input: Consumer):
+    def test(self, input):
         return input.start
 
 
 @dataclasses.dataclass
 class End(Matcher):
 
-    def test(self, input: Consumer):
+    def test(self, input):
         return input.end
 
 
@@ -157,7 +165,7 @@ class Repeat(Matcher):
     min: int
     max: int = 0xffffffff
 
-    def test(self, input: Consumer):
+    def test(self, input):
         for x in range(self.max):
             input.mark()
             if not self.delegate.test(input):
@@ -261,6 +269,9 @@ def build(pattern):
                     values += current
 
                 matchers.append(Group(values, negate))
+
+            case '.':
+                matchers.append(Wildcard())
 
             case '+':
                 matcher = matchers.pop()
