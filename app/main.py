@@ -1,12 +1,24 @@
 import abc
 import dataclasses
+import enum
 import sys
 import typing
 
 
-class CharacterClasses:
+class CharacterClass(enum.Enum):
 
-    w = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_"
+    DIGITS = "d"
+    WORDS = "w"
+
+    def test(self, character: str):
+        character = ord(character)
+
+        match self:
+            case CharacterClass.DIGITS:
+                return character >= ord('0') and character <= ord('9')
+
+            case _:
+                raise RuntimeError(f"unknown enum: {self}")
 
 
 @dataclasses.dataclass
@@ -58,10 +70,10 @@ class Literal(Matcher):
 @dataclasses.dataclass
 class Range(Matcher):
 
-    values: str
+    character_class: CharacterClass
 
     def test(self, input: Consumer):
-        return input.next() in self.values
+        return self.character_class.test(input.next())
 
 
 @dataclasses.dataclass
@@ -85,12 +97,11 @@ def build(pattern):
     if len(pattern) == 1:
         literal = Literal(pattern[0])
         start.add(literal, end)
+    elif pattern == '\\d':
+        range = Range(CharacterClass.DIGITS)
+        start.add(range, end)
     else:
         raise RuntimeError(f"Unhandled pattern: {pattern}")
-
-    # range = Range(CharacterClasses.w)
-    # start.add(range, start)
-    # start.add(range, end)
 
     return start
 
