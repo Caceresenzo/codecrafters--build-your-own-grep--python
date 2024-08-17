@@ -54,6 +54,18 @@ class Consumer:
 
         return self.input[previous_index]
 
+    def current(self):
+        if self.end:
+            return "\0"
+
+        return self.input[self.index]
+
+    def peek(self):
+        try:
+            return self.input[self.index + 1]
+        except IndexError:
+            return "\0"
+
     def mark(self):
         self.marks.append(self.index)
         return self.index
@@ -119,6 +131,13 @@ class Start(Matcher):
 
     def test(self, input: Consumer):
         return input.start
+
+
+@dataclasses.dataclass
+class End(Matcher):
+
+    def test(self, input: Consumer):
+        return input.end
 
 
 @dataclasses.dataclass
@@ -209,6 +228,10 @@ def build(pattern):
                 matcher = Start()
                 link(matcher)
 
+            case '$':
+                matcher = End()
+                link(matcher)
+
             case '[':
                 values = ""
                 negate = False
@@ -233,7 +256,7 @@ def build(pattern):
 
                 while True:
                     next = read_current()
-                    if next in "\\[]\0":
+                    if next in "\\[]^$\0":
                         break
 
                     value += next
@@ -245,18 +268,21 @@ def build(pattern):
     return start
 
 
-def match(root: Node, input: Consumer) -> bool:
+def match(root: Node, input: Consumer, is_start=True) -> bool:
     if root.end:
         return True
 
-    while not input.end:
+    while True:
         for matcher, node in root.matchers:
             input.mark()
 
             if matcher.test(input):
-                return match(node, input)
+                return match(node, input, is_start=False)
 
             input.reset()
+
+        if not is_start or input.end:
+            break
 
         input.next()
 
