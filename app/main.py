@@ -86,9 +86,15 @@ class Range(Matcher):
 class Group(Matcher):
 
     values: str
+    negate: bool = False
 
     def test(self, input: Consumer):
-        return input.next() in self.values
+        is_in = input.next() in self.values
+
+        if self.negate:
+            is_in = not is_in
+
+        return is_in
 
 
 @dataclasses.dataclass
@@ -119,7 +125,11 @@ def build(pattern):
         range = Range(CharacterClass.WORDS)
         start.add(range, end)
     elif pattern[0] == '[' and pattern[-1] == ']':
-        group = Group(pattern[1:-1])
+        if pattern[1] == '^':
+            group = Group(pattern[2:-1], negate=True)
+        else:
+            group = Group(pattern[1:-1], negate=False)
+
         start.add(group, end)
     else:
         raise RuntimeError(f"Unhandled pattern: {pattern}")
