@@ -78,6 +78,9 @@ class Consumer:
         self.index = self.marks.pop()
         return self.index
 
+    def slice(self, start: int):
+        return self.input[start:self.index]
+
     @property
     def start(self):
         return self.index == 0
@@ -181,17 +184,31 @@ class Repeat(Matcher):
 class Capture(Matcher):
 
     matchers: typing.List[Matcher]
+    value: str = None
 
     def test(self, input):
         for matcher in self.matchers:
-            input.mark()
+            start = input.mark()
 
             if matcher.test(input):
+                self.value = input.slice(start)
                 return True
 
             input.reset()
 
         return False
+
+
+@dataclasses.dataclass
+class Backreference(Matcher):
+
+    number: int
+    capture: Capture
+
+    def test(self, input):
+        delegate = Literal(self.capture.value)
+
+        return delegate.test(input)
 
 
 @dataclasses.dataclass
@@ -223,6 +240,7 @@ class Node:
 
 def build(pattern):
     matchers: typing.List[Matcher] = []
+    captures: typing.List[Capture] = []
 
     index = 0
 
@@ -256,7 +274,11 @@ def build(pattern):
             case '\\':
                 klass = consume()
 
-                if klass == '\\':
+                if klass.isnumeric():
+                    number = int(klass)
+                    capture = captures[number - 1]
+                    matcher = Backreference(number, capture)
+                elif klass == '\\':
                     matcher = Literal("\\")
                 else:
                     matcher = Range(CharacterClass.of(klass))
@@ -298,10 +320,13 @@ def build(pattern):
 
                     content += current
 
-                matchers.append(Capture([
+                matcher = Capture([
                     Literal(part)
                     for part in content.split("|")
-                ]))
+                ])
+
+                matchers.append(matcher)
+                captures.append(matcher)
 
             case '.':
                 matchers.append(Wildcard())
@@ -325,7 +350,7 @@ def build(pattern):
         node.add(matcher, next)
         node = next
 
-    return start
+    return start, captures
 
 
 def match(root: Node, input: Consumer, is_start=True) -> bool:
@@ -357,10 +382,11 @@ def main():
         print("Expected first argument to be '-E'")
         exit(1)
 
-    graph = build(pattern)
+    graph, captures = build(pattern)
     graph.print()
 
     if match(graph, Consumer(input_line)):
+        print(captures)
         exit(0)
     else:
         exit(1)
