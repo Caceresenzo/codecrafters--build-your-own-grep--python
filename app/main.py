@@ -178,6 +178,23 @@ class Repeat(Matcher):
 
 
 @dataclasses.dataclass
+class Capture(Matcher):
+
+    matchers: typing.List[Matcher]
+
+    def test(self, input):
+        for matcher in self.matchers:
+            input.mark()
+
+            if matcher.test(input):
+                return True
+
+            input.reset()
+
+        return False
+
+
+@dataclasses.dataclass
 class Node:
 
     name: str
@@ -269,6 +286,22 @@ def build(pattern):
                     values += current
 
                 matchers.append(Group(values, negate))
+
+            case '(':
+                content = ""
+
+                while True:
+                    current = consume()
+
+                    if current == ")":
+                        break
+
+                    content += current
+
+                matchers.append(Capture([
+                    Literal(part)
+                    for part in content.split("|")
+                ]))
 
             case '.':
                 matchers.append(Wildcard())
