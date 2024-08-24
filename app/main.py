@@ -219,6 +219,7 @@ class Repeat(Node):
 @dataclasses.dataclass(kw_only=True)
 class Capture(Node):
 
+    number: int
     value: str = None
     
     def match(self, input):
@@ -260,6 +261,7 @@ class Backreference(Node):
 
 def build(pattern):
     captures: typing.List[Capture] = []
+    capture_number = 0
 
     q_increment = 0
     index = 0
@@ -288,6 +290,8 @@ def build(pattern):
             return "\0"
 
     def parse():
+        nonlocal capture_number
+
         ors: typing.List[Or] = []
         nodes: typing.List[Node] = []
 
@@ -300,8 +304,7 @@ def build(pattern):
 
                     if klass.isnumeric():
                         number = int(klass)
-                        capture = captures[number - 1]
-                        node = Backreference(number=number, capture=capture)
+                        node = Backreference(number=number, capture=None)
                     elif klass == '\\':
                         node = Literal(value="\\")
                     else:
@@ -334,8 +337,11 @@ def build(pattern):
                     nodes.append(Group(values=values, negate=negate))
 
                 case '(':
+                    capture_number += 1
+                    number = capture_number
+
                     nested = parse()
-                    capture = Capture(children=nested)
+                    capture = Capture(number=number, children=nested)
 
                     nodes.append(capture)
                     captures.append(capture)
@@ -374,16 +380,24 @@ def build(pattern):
     start.children = parse()
     start.children[-1].final = True
 
-    def assign_names(nodes: typing.List[Node]):
+    capture_by_number = {
+        capture.number: capture
+        for capture in captures
+    }
+
+    def post_process(nodes: typing.List[Node]):
         nonlocal q_increment
 
         for node in nodes:
+            if isinstance(node, Backreference):
+                node.capture = capture_by_number[node.number]
+
             q_increment += 1
             node.name = f"q{q_increment}"
 
-            assign_names(node.children)
+            post_process(node.children)
     
-    assign_names(start.children)
+    post_process(start.children)
 
     return start, captures
 
