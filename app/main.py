@@ -1,7 +1,6 @@
 import abc
 import dataclasses
 import enum
-import pprint
 import sys
 import typing
 
@@ -93,23 +92,58 @@ class Consumer:
         return f"Consumer(input='{self.input}', index={self.index}, marks={self.marks}, remaining={self.input[self.index:]})"
 
 
-class Matcher(abc.ABC):
+@dataclasses.dataclass(kw_only=True)
+class Node(abc.ABC):
 
-    @abc.abstractmethod
+    name: str = "unnamed"
+    children: typing.List["Node"] = dataclasses.field(default_factory=list, repr=False)
+    final: bool = dataclasses.field(default=False, repr=False)
+
     def test(self, input: Consumer) -> bool:
-        pass
+        return True
+
+    def match(self, input: Consumer) -> bool:
+        input.mark()
+
+        if not self.test(input):
+            input.reset()
+            return False
+
+        for node in self.children:
+            result = node.match(input)
+
+            if not result:
+                input.reset()
+                return False
+
+        return True
+
+    def add(self, node: "Node"):
+        self.children.append(node)
+
+    def print(self, depth=0):
+        tab = "    " * depth
+
+        print(f'{tab}{self}')
+
+        for node in self.children:
+            node.print(depth + 1)
+
+        if self.final:
+            print(f'{tab}-- Final --')
+            return
 
 
-@dataclasses.dataclass
-class Wildcard(Matcher):
+@dataclasses.dataclass(kw_only=True)
+class Wildcard(Node):
 
     def test(self, input):
         input.next()
         return True
 
 
-@dataclasses.dataclass
-class Literal(Matcher):
+@dataclasses.dataclass(kw_only=True)
+class Literal(Node):
 
     value: str
 
@@ -121,8 +155,8 @@ class Literal(Matcher):
         return True
 
 
-@dataclasses.dataclass
-class Range(Matcher):
+@dataclasses.dataclass(kw_only=True)
+class Range(Node):
 
     character_class: CharacterClass
 
@@ -130,8 +164,8 @@ class Range(Matcher):
         return self.character_class.test(input.next())
 
 
-@dataclasses.dataclass
-class Group(Matcher):
+@dataclasses.dataclass(kw_only=True)
+class Group(Node):
 
     values: str
     negate: bool = False
@@ -147,31 +181,33 @@ class Group(Matcher):
             return next in self.values
 
 
-@dataclasses.dataclass
-class Start(Matcher):
+@dataclasses.dataclass(kw_only=True)
+class Start(Node):
 
     def test(self, input):
         return input.start
 
 
-@dataclasses.dataclass
-class End(Matcher):
+@dataclasses.dataclass(kw_only=True)
+class End(Node):
 
     def test(self, input):
         return input.end
 
 
-@dataclasses.dataclass
-class Repeat(Matcher):
+@dataclasses.dataclass(kw_only=True)
+class Repeat(Node):
 
-    delegate: Matcher
     min: int
     max: int = 0xffffffff
 
-    def test(self, input):
+    def match(self, input):
+        first, = self.children
+
         for x in range(self.max):
             input.mark()
-            if not self.delegate.test(input):
+
+            if not first.match(input):
                 input.reset()
                 return x >= self.min
 
@@ -180,68 +216,52 @@ class Repeat(Matcher):
         return True
 
 
-@dataclasses.dataclass
-class Capture(Matcher):
+@dataclasses.dataclass(kw_only=True)
+class Capture(Node):
 
-    matchers: typing.List[Matcher]
     value: str = None
+    
+    def match(self, input):
+        start = input.index
 
-    def test(self, input):
-        for matcher in self.matchers:
-            start = input.mark()
+        if super().match(input):
+            self.value = input.slice(start)
+            return True
 
-            if matcher.test(input):
-                self.value = input.slice(start)
+        return False
+
+
+@dataclasses.dataclass(kw_only=True)
+class Or(Node):
+
+    def match(self, input):
+        for node in self.children:
+            input.mark()
+
+            if node.match(input):
                 return True
-
+    
             input.reset()
 
         return False
 
 
-@dataclasses.dataclass
-class Backreference(Matcher):
+@dataclasses.dataclass(kw_only=True)
+class Backreference(Node):
 
     number: int
     capture: Capture
 
     def test(self, input):
-        delegate = Literal(self.capture.value)
+        delegate = Literal(value=self.capture.value)
 
         return delegate.test(input)
 
 
-@dataclasses.dataclass
-class Node:
-
-    name: str
-    matchers: typing.List[typing.Tuple[Matcher, "Node"]] = dataclasses.field(default_factory=list)
-
-    @property
-    def end(self):
-        return len(self.matchers) == 0
-
-    def add(self, matcher: Matcher, node: "Node"):
-        self.matchers.append((matcher, node))
-
-    def print(self, depth=0):
-        tab = "    " * depth
-
-        print(f'{tab}Node "{self.name}"')
-
-        if not self.matchers:
-            print(f'{tab}End')
-            return
-
-        for index, (matcher, node) in enumerate(self.matchers):
-            print(f'{tab}  [{index}] {matcher}')
-            node.print(depth + 1)
-
-
 def build(pattern):
-    matchers: typing.List[Matcher] = []
     captures: typing.List[Capture] = []
 
+    q_increment = 0
     index = 0
 
     def consume():
@@ -267,111 +287,118 @@ def build(pattern):
         except IndexError:
             return "\0"
 
-    while index < len(pattern):
-        current = consume()
+    def parse():
+        ors: typing.List[Or] = []
+        nodes: typing.List[Node] = []
 
-        match current:
-            case '\\':
-                klass = consume()
+        while index < len(pattern):
+            current = consume()
 
-                if klass.isnumeric():
-                    number = int(klass)
-                    capture = captures[number - 1]
-                    matcher = Backreference(number, capture)
-                elif klass == '\\':
-                    matcher = Literal("\\")
-                else:
-                    matcher = Range(CharacterClass.of(klass))
+            match current:
+                case '\\':
+                    klass = consume()
 
-                matchers.append(matcher)
+                    if klass.isnumeric():
+                        number = int(klass)
+                        capture = captures[number - 1]
+                        node = Backreference(number=number, capture=capture)
+                    elif klass == '\\':
+                        node = Literal(value="\\")
+                    else:
+                        node = Range(character_class=CharacterClass.of(klass))
 
-            case '^':
-                matchers.append(Start())
+                    nodes.append(node)
 
-            case '$':
-                matchers.append(End())
+                case '^':
+                    nodes.append(Start())
 
-            case '[':
-                values = ""
-                negate = False
+                case '$':
+                    nodes.append(End())
 
-                while True:
-                    current = consume()
+                case '[':
+                    values = ""
+                    negate = False
 
-                    if current == '^' and not values:
-                        negate = True
-                        continue
+                    while True:
+                        current = consume()
 
-                    if current == "]":
-                        break
+                        if current == '^' and not values:
+                            negate = True
+                            continue
 
-                    values += current
+                        if current == "]":
+                            break
 
-                matchers.append(Group(values, negate))
+                        values += current
 
-            case '(':
-                content = ""
+                    nodes.append(Group(values=values, negate=negate))
 
-                while True:
-                    current = consume()
+                case '(':
+                    nested = parse()
+                    capture = Capture(children=nested)
 
-                    if current == ")":
-                        break
+                    nodes.append(capture)
+                    captures.append(capture)
 
-                    content += current
+                case ')':
+                    break
 
-                matcher = Capture([
-                    Literal(part)
-                    for part in content.split("|")
-                ])
+                case '|':
+                    ors.append(Node(children=nodes))
+                    nodes = []
 
-                matchers.append(matcher)
-                captures.append(matcher)
+                case '.':
+                    nodes.append(Wildcard())
 
-            case '.':
-                matchers.append(Wildcard())
+                case '+':
+                    last = nodes.pop()
+                    nodes.append(Repeat(children=[last], min=1))
 
-            case '+':
-                matcher = matchers.pop()
-                matchers.append(Repeat(matcher, 1))
+                case '?':
+                    last = nodes.pop()
+                    nodes.append(Repeat(children=[last], min=0, max=1))
 
-            case '?':
-                matcher = matchers.pop()
-                matchers.append(Repeat(matcher, 0, 1))
+                case _:
+                    nodes.append(Literal(value=current))
 
-            case _:
-                matchers.append(Literal(current))
+        if ors:
+            if nodes:
+                ors.append(Node(children=nodes))
 
-    start = Node("start")
+            return [Or(children=ors)]
 
-    node = start
-    for index, matcher in enumerate(matchers, 1):
-        next = Node(f"q{index}")
-        node.add(matcher, next)
-        node = next
+        return nodes
+
+    start = Node()
+    start.name = "start"
+    start.children = parse()
+    start.children[-1].final = True
+
+    def assign_names(nodes: typing.List[Node]):
+        nonlocal q_increment
+
+        for node in nodes:
+            q_increment += 1
+            node.name = f"q{q_increment}"
+
+            assign_names(node.children)
+    
+    assign_names(start.children)
 
     return start, captures
 
 
-def match(root: Node, input: Consumer, is_start=True) -> bool:
-    if root.end:
-        return True
+def match(root: Node, input: str):
+    input = Consumer(input)
 
-    while True:
-        for matcher, node in root.matchers:
-            input.mark()
+    while not input.end:
+        input.mark()
 
-            if matcher.test(input):
-                return match(node, input, is_start=False)
+        if root.match(input):
+            return True
 
-            input.reset()
-
-        if not is_start or input.end:
-            break
-
+        input.reset()
         input.next()
-
-    return False
 
 
 def main():
@@ -385,8 +412,10 @@ def main():
     graph, captures = build(pattern)
     graph.print()
 
-    if match(graph, Consumer(input_line)):
-        print(captures)
+    if match(graph, input_line):
+        for index, capture in enumerate(captures):
+            print(f"group[{index + 1}] = `{capture.value}`")
+
         exit(0)
     else:
         exit(1)
