@@ -145,7 +145,7 @@ class Node(abc.ABC):
 
 
 @dataclasses.dataclass(kw_only=True)
-class MatchNode(Node):
+class PredicateNode(Node):
 
     def test(self, input):
         return True
@@ -162,14 +162,14 @@ class MatchNode(Node):
 
 
 @dataclasses.dataclass(kw_only=True)
-class Wildcard(MatchNode):
+class Wildcard(PredicateNode):
 
     def test(self, input):
         return input.next() != "\0"
 
 
 @dataclasses.dataclass(kw_only=True)
-class Literal(MatchNode):
+class Literal(PredicateNode):
 
     value: str
 
@@ -182,7 +182,7 @@ class Literal(MatchNode):
 
 
 @dataclasses.dataclass(kw_only=True)
-class Range(MatchNode):
+class Range(PredicateNode):
 
     character_class: CharacterClass
 
@@ -191,7 +191,7 @@ class Range(MatchNode):
 
 
 @dataclasses.dataclass(kw_only=True)
-class Group(MatchNode):
+class Group(PredicateNode):
 
     values: str
     negate: bool = False
@@ -230,13 +230,8 @@ class Repeat(Node):
 
     def match(self, input):
         for x in range(self.max):
-            input.mark()
-
             if not self.child.match(input):
-                input.reset()
                 return x >= self.min
-
-            input.pop()
 
         return True
 
@@ -259,15 +254,17 @@ class Capture(Node):
 
 
 @dataclasses.dataclass(kw_only=True)
-class Backreference(MatchNode):
+class Backreference(PredicateNode):
 
     number: int
     capture: Capture
 
     def test(self, input):
-        delegate = Literal(value=self.capture.value)
+        return Literal.test(self, input)
 
-        return delegate.test(input)
+    @property
+    def value(self):
+        return self.capture.value
 
 
 @dataclasses.dataclass(kw_only=True)
@@ -517,6 +514,9 @@ def main():
 
         exit(0)
     else:
+        for index, capture in enumerate(captures):
+            print(f"group[{index + 1}] = `{capture.value}`")
+
         exit(1)
 
 
