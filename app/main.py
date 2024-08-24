@@ -42,7 +42,11 @@ class Consumer:
 
     input: str
     index: int = 0
-    marks: typing.List[int] = dataclasses.field(default_factory=list)
+    max: int = -1
+    marks: typing.List[typing.Tuple[int, int]] = dataclasses.field(default_factory=list)
+
+    def __post_init__(self):
+        self.max = len(self.input)
 
     def next(self):
         if self.end:
@@ -51,34 +55,70 @@ class Consumer:
         previous_index = self.index
         self.index += 1
 
-        return self.input[previous_index]
+        return self.input[:self.max][previous_index]
 
     def current(self):
         if self.end:
             return "\0"
 
-        return self.input[self.index]
+        return self.input[:self.max][self.index]
 
     def peek(self):
         try:
-            return self.input[self.index + 1]
+            return self.input[:self.max][self.index + 1]
         except IndexError:
             return "\0"
 
-    def mark(self):
-        self.marks.append(self.index)
-        return self.index
+    def mark(self, *, index=None, max=None):
+        # print(f"mark, marks={self.marks}")
+        self.marks.append((self.index, self.max))
+
+        if index is not None:
+            if index < 0:
+                self.index -= index
+            else:
+                self.index = index
+
+        if max is not None:
+            if max < 0:
+                self.max -= max
+            else:
+                self.max = max
 
     def pop(self):
-        self.marks.pop()
-        return self.index
+        # print(f"pop, marks={self.marks}")
+        self._pop()
 
-    def reset(self):
-        self.index = self.marks.pop()
-        return self.index
+    def _pop(self):
+        if len(self.marks):
+            return self.marks.pop()
+
+        if self.index != 0 or self.max != len(self.input):
+            return 0, len(self.input)
+
+        raise ValueError("pop stack empty")
+
+    def reset(self, *, index=True, max=True):
+        # print(f"reset, marks={self.marks}")
+        old_index, old_max = self._pop()
+
+        if index:
+            self.index = old_index
+
+        if max:
+            self.max = old_max
+
+    def restore(self, *, index=False, max=False):
+        old_index, old_max = self.marks[-1]
+
+        if index:
+            self.index = old_index
+
+        if max:
+            self.max = old_max
 
     def slice(self, start: int):
-        return self.input[start:self.index]
+        return self.input[:self.max][start:self.index]
 
     @property
     def start(self):
@@ -86,64 +126,50 @@ class Consumer:
 
     @property
     def end(self):
-        return self.index >= len(self.input)
+        return self.index >= self.max
 
     def __str__(self):
-        return f"Consumer(input='{self.input}', index={self.index}, marks={self.marks}, remaining={self.input[self.index:]})"
+        return f"Consumer('{self.input}'[{self.index}:{self.max}]='{self.input[self.index:self.max]}', marks={self.marks})"
 
 
 @dataclasses.dataclass(kw_only=True)
 class Node(abc.ABC):
 
     name: str = "unnamed"
-    children: typing.List["Node"] = dataclasses.field(default_factory=list, repr=False)
-    final: bool = dataclasses.field(default=False, repr=False)
-
-    def test(self, input: Consumer) -> bool:
-        return True
 
     def match(self, input: Consumer) -> bool:
-        input.mark()
-
-        if not self.test(input):
-            input.reset()
-            return False
-
-        for node in self.children:
-            result = node.match(input)
-
-            if not result:
-                input.reset()
-                return False
-
-        return True
+        raise NotImplementedError()
 
     def add(self, node: "Node"):
         self.children.append(node)
 
-    def print(self, depth=0):
-        tab = "    " * depth
-
-        print(f'{tab}{self}')
-
-        for node in self.children:
-            node.print(depth + 1)
-
-        if self.final:
-            print(f'{tab}-- Final --')
-            return
-
 
 @dataclasses.dataclass(kw_only=True)
-class Wildcard(Node):
+class MatchNode(Node):
 
     def test(self, input):
-        input.next()
         return True
+
+    def match(self, input):
+        input.mark()
+
+        if self.test(input):
+            input.pop()
+            return True
+
+        input.reset()
+        return False
 
 
 @dataclasses.dataclass(kw_only=True)
-class Literal(Node):
+class Wildcard(MatchNode):
+
+    def test(self, input):
+        return input.next() != "\0"
+
+
+@dataclasses.dataclass(kw_only=True)
+class Literal(MatchNode):
 
     value: str
 
@@ -156,7 +182,7 @@ class Literal(Node):
 
 
 @dataclasses.dataclass(kw_only=True)
-class Range(Node):
+class Range(MatchNode):
 
     character_class: CharacterClass
 
@@ -165,7 +191,7 @@ class Range(Node):
 
 
 @dataclasses.dataclass(kw_only=True)
-class Group(Node):
+class Group(MatchNode):
 
     values: str
     negate: bool = False
@@ -182,16 +208,16 @@ class Group(Node):
 
 
 @dataclasses.dataclass(kw_only=True)
-class Start(Node):
+class StartAnchor(Node):
 
-    def test(self, input):
+    def match(self, input):
         return input.start
 
 
 @dataclasses.dataclass(kw_only=True)
-class End(Node):
+class EndAnchor(Node):
 
-    def test(self, input):
+    def match(self, input):
         return input.end
 
 
@@ -200,14 +226,13 @@ class Repeat(Node):
 
     min: int
     max: int = 0xffffffff
+    child: "Node" = dataclasses.field(repr=False)
 
     def match(self, input):
-        first, = self.children
-
         for x in range(self.max):
             input.mark()
 
-            if not first.match(input):
+            if not self.child.match(input):
                 input.reset()
                 return x >= self.min
 
@@ -221,11 +246,12 @@ class Capture(Node):
 
     number: int
     value: str = None
-    
+    child: "Node" = dataclasses.field(repr=False)
+
     def match(self, input):
         start = input.index
 
-        if super().match(input):
+        if self.child.match(input):
             self.value = input.slice(start)
             return True
 
@@ -233,22 +259,7 @@ class Capture(Node):
 
 
 @dataclasses.dataclass(kw_only=True)
-class Or(Node):
-
-    def match(self, input):
-        for node in self.children:
-            input.mark()
-
-            if node.match(input):
-                return True
-    
-            input.reset()
-
-        return False
-
-
-@dataclasses.dataclass(kw_only=True)
-class Backreference(Node):
+class Backreference(MatchNode):
 
     number: int
     capture: Capture
@@ -257,6 +268,41 @@ class Backreference(Node):
         delegate = Literal(value=self.capture.value)
 
         return delegate.test(input)
+
+
+@dataclasses.dataclass(kw_only=True)
+class And(Node):
+
+    children: typing.List["Node"] = dataclasses.field(repr=False, default_factory=list)
+
+    def match(self, input):
+        for node in self.children:
+            if not node.match(input):
+                return False
+
+        return True
+
+
+@dataclasses.dataclass(kw_only=True)
+class Or(Node):
+
+    children: typing.List["Node"] = dataclasses.field(repr=False, default_factory=list)
+
+    def match(self, input):
+        for node in self.children:
+            if node.match(input):
+                return True
+
+        return False
+
+
+@dataclasses.dataclass(kw_only=True)
+class Final(Node):
+
+    name = "final"
+
+    def match(self, input):
+        return True
 
 
 def build(pattern):
@@ -277,23 +323,19 @@ def build(pattern):
         except IndexError:
             return "\0"
 
-    def read_current():
-        try:
-            return pattern[index]
-        except IndexError:
-            return "\0"
-
-    def read_peek():
-        try:
-            return pattern[index + 1]
-        except IndexError:
-            return "\0"
-
     def parse():
         nonlocal capture_number
 
         ors: typing.List[Or] = []
         nodes: typing.List[Node] = []
+
+        def append_repeat(min: int, max=Repeat.max):
+            last = nodes.pop()
+            if isinstance(last, Literal) and len(last.value) > 1:
+                nodes.append(Literal(value=last.value[:-1]))
+                last = Literal(value=last.value[-1])
+
+            nodes.append(Repeat(child=last, min=min, max=max))
 
         while index < len(pattern):
             current = consume()
@@ -313,10 +355,10 @@ def build(pattern):
                     nodes.append(node)
 
                 case '^':
-                    nodes.append(Start())
+                    nodes.append(StartAnchor())
 
                 case '$':
-                    nodes.append(End())
+                    nodes.append(EndAnchor())
 
                 case '[':
                     values = ""
@@ -341,7 +383,7 @@ def build(pattern):
                     number = capture_number
 
                     nested = parse()
-                    capture = Capture(number=number, children=nested)
+                    capture = Capture(number=number, child=nested)
 
                     nodes.append(capture)
                     captures.append(capture)
@@ -350,35 +392,32 @@ def build(pattern):
                     break
 
                 case '|':
-                    ors.append(Node(children=nodes))
+                    ors.append(And(children=nodes) if len(nodes) > 1 else nodes[0])
                     nodes = []
 
                 case '.':
                     nodes.append(Wildcard())
 
-                case '+':
-                    last = nodes.pop()
-                    nodes.append(Repeat(children=[last], min=1))
-
-                case '?':
-                    last = nodes.pop()
-                    nodes.append(Repeat(children=[last], min=0, max=1))
+                case '+': append_repeat(min=1)
+                case '?': append_repeat(min=0, max=1)
 
                 case _:
-                    nodes.append(Literal(value=current))
+                    last = nodes[-1] if len(nodes) else None
+                    if isinstance(last, Literal):
+                        last.value += current
+                    else:
+                        nodes.append(Literal(value=current))
 
         if ors:
             if nodes:
-                ors.append(Node(children=nodes))
+                ors.append(And(children=nodes))
 
-            return [Or(children=ors)]
+            return Or(children=ors)
 
-        return nodes
+        return And(children=nodes)
 
-    start = Node()
-    start.name = "start"
-    start.children = parse()
-    start.children[-1].final = True
+    start = And(name="start", children=[parse()])
+    start.children.append(Final())
 
     capture_by_number = {
         capture.number: capture
@@ -395,8 +434,12 @@ def build(pattern):
             q_increment += 1
             node.name = f"q{q_increment}"
 
-            post_process(node.children)
-    
+            if hasattr(node, "children"):
+                post_process(node.children)
+
+            if hasattr(node, "child"):
+                post_process([node.child])
+
     post_process(start.children)
 
     return start, captures
@@ -415,6 +458,48 @@ def match(root: Node, input: str):
         input.next()
 
 
+def draw(node: Node, depth=0):
+    tab = "    " * depth
+
+    print(f'{tab}{node}')
+
+    if isinstance(node, Wildcard):
+        pass
+    elif isinstance(node, Literal):
+        # print(f'{tab}  .value="{node.value}"')
+        pass
+    elif isinstance(node, Range):
+        # print(f'{tab}  .character_class="{node.character_class.name}"')
+        pass
+    elif isinstance(node, Group):
+        # print(f'{tab}  .values="{node.values}"')
+        # print(f'{tab}  .negate={node.negate}')
+        pass
+    elif isinstance(node, StartAnchor):
+        pass
+    elif isinstance(node, EndAnchor):
+        pass
+    elif isinstance(node, Repeat):
+        # print(f'{tab}  .min={node.min}')
+        # print(f'{tab}  .max={node.max}')
+        draw(node.child, depth + 1)
+    elif isinstance(node, Capture):
+        # print(f'{tab}  .number={node.number}')
+        # print(f'{tab}  .value="{node.value}"')
+        draw(node.child, depth + 1)
+    elif isinstance(node, Backreference):
+        # print(f'{tab}  .number={node.number}')
+        # print(f'{tab}  .capture="{node.capture}"')
+        pass
+    elif isinstance(node, (And, Or)):
+        for child in node.children:
+            draw(child, depth + 1)
+    elif isinstance(node, Final):
+        pass
+    else:
+        raise NotImplementedError(str(node))
+
+
 def main():
     pattern = sys.argv[2]
     input_line = sys.stdin.read()
@@ -424,7 +509,7 @@ def main():
         exit(1)
 
     graph, captures = build(pattern)
-    graph.print()
+    draw(graph)
 
     if match(graph, input_line):
         for index, capture in enumerate(captures):
