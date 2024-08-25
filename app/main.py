@@ -411,7 +411,7 @@ def build(pattern):
 
             return Or(children=ors)
 
-        return And(children=nodes)
+        return And(children=nodes) if len(nodes) > 1 else nodes[0]
 
     start = And(name="start", children=[parse()])
     start.children.append(Final())
