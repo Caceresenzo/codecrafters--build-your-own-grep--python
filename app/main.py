@@ -1,4 +1,5 @@
 import sys
+import typing
 
 import click
 
@@ -24,14 +25,19 @@ def main(
     found = False
 
     if not len(files):
-        found |= handle_line(pattern, sys.stdin.read())
+        found |= handle_lines(pattern, sys.stdin)
 
     else:
         for file in files:
+            file_name = None if len(files) == 1 else file
+
             try:
                 with open(file, "r") as fd:
-                    for line in fd:
-                        found |= handle_line(pattern, line.strip())
+                    found |= handle_lines(
+                        pattern,
+                        fd,
+                        file_name
+                    )
             except FileNotFoundError:
                 print(f"grep: {file}: No such file or directory", file=sys.stderr)
 
@@ -39,14 +45,26 @@ def main(
         exit(1)
 
 
-def handle_line(pattern: Pattern, line: str) -> bool:
-    matcher = pattern.matcher(line)
+def handle_lines(
+    pattern: Pattern,
+    fd: typing.TextIO,
+    file_name: str | None = None
+) -> bool:
+    found = False
 
-    if not matcher.find(0):
-        return False
+    for line in fd:
+        line = line.rstrip("\n")
+        matcher = pattern.matcher(line)
 
-    print(line)
-    return True
+        if matcher.find(0):
+            found = True
+
+            if file_name:
+                print(f"{file_name}:{line}")
+            else:
+                print(line)
+
+    return found
 
 
 if __name__ == "__main__":
