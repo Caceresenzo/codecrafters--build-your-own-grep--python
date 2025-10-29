@@ -238,6 +238,8 @@ class PatternParser:
             return (1, RepeatNode.UNBOUNDED)
         elif self.match('?'):
             return (0, 1)
+        elif self.match('*'):
+            return (0, RepeatNode.UNBOUNDED)
         else:
             return None
 
