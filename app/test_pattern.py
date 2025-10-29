@@ -207,3 +207,10 @@ def test_any_plus_at_start():
     pattern = Pattern.compile(r".+ar")
 
     assert pattern.matcher("carx").find(0) is True
+
+
+def test_star():
+    pattern = Pattern.compile(r"watermelon*")
+
+    assert pattern.matcher("watermelon").find(0) is True
+    assert pattern.matcher("watermelo").find(0) is True
