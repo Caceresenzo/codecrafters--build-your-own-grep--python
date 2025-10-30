@@ -1,5 +1,6 @@
 import abc
 import enum
+from typing import Callable
 
 
 class Pattern:
@@ -240,8 +241,35 @@ class PatternParser:
             return (0, 1)
         elif self.match('*'):
             return (0, RepeatNode.UNBOUNDED)
-        else:
+        elif not self.match('{'):
             return None
+        
+        times = self.parse_number()
+
+        if not self.match('}'):
+            raise ValueError("expected `}` after `{`")
+        
+        return (times, times)
+    
+    def parse_number(self) -> int:
+        digits = self.consume_while(str.isdigit)
+
+        return int(digits)
+
+    def consume_while(self, predicate: Callable[[str], bool]) -> str:
+        builder: str = ""
+
+        while True:
+            character = self.peek()
+            if character == '\0':
+                break
+
+            if not predicate(character):
+                break
+
+            builder += self.consume()
+
+        return builder
 
     def to_branch_if_necessary(self, contexts: list["Context"], last: "Node", intermediate_last: "Node") -> "Node":
         if len(contexts) == 1:

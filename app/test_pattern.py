@@ -214,3 +214,10 @@ def test_star():
 
     assert pattern.matcher("watermelon").find(0) is True
     assert pattern.matcher("watermelo").find(0) is True
+
+
+def test_exactly_n_times():
+    pattern = Pattern.compile(r"ca{3}t")
+
+    assert pattern.matcher("caaat").find(0) is True
+    assert pattern.matcher("caat").find(0) is False
