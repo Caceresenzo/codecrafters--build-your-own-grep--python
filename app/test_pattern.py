@@ -229,3 +229,12 @@ def test_minimum_n_times():
     assert pattern.matcher("caat").find(0) is True
     assert pattern.matcher("caaaaat").find(0) is True
     assert pattern.matcher("cat").find(0) is False
+
+
+def test_between_n_and_m_times():
+    pattern = Pattern.compile(r"ca{2,4}t")
+
+    assert pattern.matcher("caat").find(0) is True
+    assert pattern.matcher("caaat").find(0) is True
+    assert pattern.matcher("caaaat").find(0) is True
+    assert pattern.matcher("caaaaat").find(0) is False

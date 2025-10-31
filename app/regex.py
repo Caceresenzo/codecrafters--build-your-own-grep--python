@@ -244,21 +244,27 @@ class PatternParser:
         elif not self.match('{'):
             return None
         
-        minimum = self.parse_number()
-        maximum = minimum
+        minimum = RepeatNode.UNBOUNDED
+        maximum = RepeatNode.UNBOUNDED
+
+        number = self.parse_number()
+        if number is not None:
+            minimum = number
 
         if self.match(','):
-            maximum = RepeatNode.UNBOUNDED
+            number = self.parse_number()
+            if number is not None:
+                maximum = number
 
         if not self.match('}'):
             raise ValueError("expected `}` after `{`")
-        
+
         return (minimum, maximum)
     
     def parse_number(self) -> int:
         digits = self.consume_while(str.isdigit)
 
-        return int(digits)
+        return int(digits) if len(digits) else None
 
     def consume_while(self, predicate: Callable[[str], bool]) -> str:
         builder: str = ""
