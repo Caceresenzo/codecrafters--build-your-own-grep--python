@@ -244,12 +244,16 @@ class PatternParser:
         elif not self.match('{'):
             return None
         
-        times = self.parse_number()
+        minimum = self.parse_number()
+        maximum = minimum
+
+        if self.match(','):
+            maximum = RepeatNode.UNBOUNDED
 
         if not self.match('}'):
             raise ValueError("expected `}` after `{`")
         
-        return (times, times)
+        return (minimum, maximum)
     
     def parse_number(self) -> int:
         digits = self.consume_while(str.isdigit)

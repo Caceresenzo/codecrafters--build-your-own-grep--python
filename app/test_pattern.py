@@ -221,3 +221,11 @@ def test_exactly_n_times():
 
     assert pattern.matcher("caaat").find(0) is True
     assert pattern.matcher("caat").find(0) is False
+
+
+def test_minimum_n_times():
+    pattern = Pattern.compile(r"ca{2,}t")
+
+    assert pattern.matcher("caat").find(0) is True
+    assert pattern.matcher("caaaaat").find(0) is True
+    assert pattern.matcher("cat").find(0) is False
